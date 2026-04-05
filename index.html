@@ -362,7 +362,7 @@ END:VCARD`;
             return output;
         }
 
-        function generateQR() {
+     function generateQR() {
             const texts = [els.r.value, els.g.value, els.b.value];
             if (!texts.some(t => t.trim())) {
                 els.main.style.opacity = 0.1;
@@ -405,24 +405,60 @@ END:VCARD`;
             els.mini.getContext('2d').drawImage(els.main, 0, 0, 32, 32);
         }
 
+        // Нові змінні для плавної роботи (винеси їх вище, якщо хочеш)
+        let stabilityTimer = 0;
+        let scanBuffer = {r: null, g: null, b: null};
+
         function processImageData(img, w, h, isFileScan) {
-            let foundAny = false;
+            let foundNow = false;
+
             [0, 1, 2].forEach(idx => {
                 const ch = ['r', 'g', 'b'][idx];
-                if (results[ch]) return;
+                // Якщо цей канал уже в буфері або в фінальних результатах — пропускаємо
+                if (results[ch] || scanBuffer[ch]) return;
+
                 const mono = applyBradley(img, idx);
                 const code = jsQR(mono, w, h, { inversionAttempts: "attemptBoth" });
-                if (code) { results[ch] = code.data; foundAny = true; }
+                
+                if (code) { 
+                    scanBuffer[ch] = code.data; 
+                    foundNow = true; 
+                }
             });
             
-            if(foundAny) {
-                els.viewfinder.classList.add('targeting'); 
-                if(results.b || (results.r && results.g && results.b)) {
-                    analysisReady = true;
-                    if(!isFileScan) triggerCaptureSequence();
-                }
+            // Якщо ми щось знайшли (зараз або раніше), починаємо "нагрівати" лічильник
+            const hasAny = scanBuffer.r || scanBuffer.g || scanBuffer.b;
+
+            if (foundNow || hasNow) {
+                stabilityTimer++;
+                els.viewfinder.classList.add('targeting');
+                // Візуальне посилення: рамка світиться яскравіше при стабільності
+                const glow = Math.min(stabilityTimer * 1.5, 40);
+                els.viewfinder.style.boxShadow = `0 0 ${glow}px rgba(0, 255, 150, 0.7)`;
+            } else {
+                stabilityTimer = Math.max(0, stabilityTimer - 1);
             }
-            return foundAny;
+
+            // Рахуємо скільки всього каналів зібрано
+            const count = ['r', 'g', 'b'].filter(ch => results[ch] || scanBuffer[ch]).length;
+
+            // Умова спрацювання: 
+            // Або зібрали всі 3 канали, або хоча б один, але тримаємо фокус (близько 1.5 сек)
+            if (count === 3 || (count > 0 && stabilityTimer > 40)) {
+                // Переносимо все з буфера в реальні результати
+                ['r', 'g', 'b'].forEach(ch => {
+                    if (scanBuffer[ch]) results[ch] = scanBuffer[ch];
+                });
+
+                analysisReady = true;
+                // Очищаємо буфер для наступного разу
+                scanBuffer = {r: null, g: null, b: null};
+                stabilityTimer = 0;
+
+                if(!isFileScan) triggerCaptureSequence();
+                return true;
+            }
+            return foundNow;
         }
 
       function triggerCaptureSequence() {
@@ -441,53 +477,7 @@ END:VCARD`;
             els.centralContainer.classList.add('scan-active');
             playSuccessSound();
             setTimeout(() => {
-                els.flash.classList.add('flash-anim');
-                setTimeout(() => {
-                    els.flash.classList.remove('flash-anim');
-                    els.centralContainer.classList.remove('scan-active');
-                    els.viewfinder.classList.remove('targeting');
-                    updateResultUI();
-                }, 400);
-            }, 2600);
-        }
-
-        function playSuccessSound() {
-            try {
-                const ctx = new (window.AudioContext || window.webkitAudioContext)();
-                const now = ctx.currentTime;
-                const osc = ctx.createOscillator();
-                const gain = ctx.createGain();
-
-                osc.type = 'sine';
-                osc.frequency.setValueAtTime(200, now);
-                osc.frequency.exponentialRampToValueAtTime(1200, now + 2.5);
-
-                gain.gain.setValueAtTime(0, now);
-                gain.gain.linearRampToValueAtTime(0.05, now + 0.5);
-                gain.gain.setValueAtTime(0.05, now + 2.0);
-                gain.gain.linearRampToValueAtTime(0, now + 2.5);
-
-                osc.connect(gain);
-                gain.connect(ctx.destination);
-                osc.start(now);
-                osc.stop(now + 2.6);
-            } catch(e) {}
-        }
-
-        function updateResultUI() {
-            els.resultIndicators.style.opacity = 1;
-            ['r', 'g', 'b'].forEach(ch => {
-                const el = els['res' + ch.toUpperCase()];
-                const indicator = el.querySelector('.indicator');
-                const text = el.querySelector('span');
-                if(results[ch]) {
-                    text.textContent = results[ch];
-                    indicator.className = 'indicator active-'+ch;
-                    el.style.opacity = 1;
-                    els[ch].value = results[ch];
-                } else {
-                    el.style.opacity = 0.4;
-                    text.textContent = translations[currentLang].res_fail;
+                els.
                 }
             });
             generateQR();
