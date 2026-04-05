@@ -1,3 +1,288 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    
+    <title>RGB-11: SCI Multi-Layer QR Encoder | Spectral Art Tool</title>
+    <meta name="description" content="Encode 3 QR codes in 1 image. Spectral separation via SCI Model by Mikhail Kashkarov.">
+    <meta name="keywords" content="qr rgb, spectral qr, sci encoder, Mikhail Kashkarov, science art">
+    <meta property="og:title" content="RGB-11 QR Encoder">
+    <meta property="og:description" content="3 QR in 1 image! Based on SCI Universal Model.">
+    <meta property="og:image" content="screenshot.png">
+    <link rel="canonical" href="https://astra31415926.github.io/RGB-11/">
+
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;800;900&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --r-color: #FF004D;
+            --g-color: #00FF41;
+            --b-color: #0088FF;
+            --bg-color: #050505;
+        }
+        
+        body { 
+            background: var(--bg-color); 
+            color: #fff; 
+            font-family: 'Inter', system-ui, sans-serif; 
+            overflow-x: hidden;
+            transition: background 0.5s;
+        }
+        
+        ::-webkit-scrollbar { width: 4px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: #333; border-radius: 2px; }
+
+        textarea {
+            background: rgba(20, 20, 20, 0.8);
+            border: 1px solid rgba(255,255,255,0.1);
+            color: #fff;
+            font-family: 'Inter', sans-serif;
+            resize: none;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            backdrop-filter: blur(10px);
+        }
+        textarea:focus { 
+            outline: none; 
+            border-color: rgba(255,255,255,0.4);
+            background: rgba(30, 30, 30, 0.9);
+            box-shadow: 0 0 20px rgba(0,0,0,0.5);
+        }
+        
+        .logo-q { color: #fff; text-shadow: 0 0 15px rgba(255,255,255,0.8); }
+        .logo-r { color: var(--r-color); text-shadow: 0 0 15px var(--r-color); }
+        .logo-g { color: var(--g-color); text-shadow: 0 0 15px var(--g-color); }
+        .logo-b { color: var(--b-color); text-shadow: 0 0 15px var(--b-color); }
+
+        .scan-line { 
+            position: absolute; left: 0; right: 0; height: 2px; 
+            background: linear-gradient(90deg, transparent, var(--g-color), transparent); 
+            box-shadow: 0 0 15px var(--g-color); 
+            top: 0; z-index: 20;
+            opacity: 0;
+            display: none;
+        }
+        
+        .scan-active .scan-line {
+            display: block;
+            opacity: 1;
+            animation: scanMove 2s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+        }
+        
+        @keyframes scanMove { 
+            0% { top: 0%; opacity: 1; } 
+            90% { opacity: 1; }
+            100% { top: 100%; opacity: 0; } 
+        }
+        
+        @keyframes flash { 
+            0% { opacity: 0; } 
+            20% { opacity: 0.9; } 
+            100% { opacity: 0; } 
+        }
+        .flash-anim { animation: flash 0.4s ease-out; }
+
+        .indicator { 
+            width: 10px; height: 10px; border-radius: 50%; 
+            background: #222; 
+            transition: all 0.3s; 
+        }
+        .active-r { background: var(--r-color); box-shadow: 0 0 12px var(--r-color); }
+        .active-g { background: var(--g-color); box-shadow: 0 0 12px var(--g-color); }
+        .active-b { background: var(--b-color); box-shadow: 0 0 12px var(--b-color); }
+        
+        .dropdown-menu { 
+            transform: translateY(-10px); opacity: 0; visibility: hidden; 
+            transition: all 0.2s ease; 
+        }
+        .dropdown-menu.show { transform: translateY(0); opacity: 1; visibility: visible; }
+        
+        .modal-overlay { 
+            opacity: 0; visibility: hidden; transition: all 0.3s ease; 
+            background: rgba(0,0,0,0.85); backdrop-filter: blur(20px); 
+        }
+        .modal-overlay.show { opacity: 1; visibility: visible; }
+        .modal-content { transform: scale(0.95); transition: transform 0.3s ease; }
+        .modal-overlay.show .modal-content { transform: scale(1); }
+
+        .viewfinder-corners {
+            position: absolute;
+            inset: 0;
+            pointer-events: none;
+            z-index: 15;
+        }
+        .corner {
+            position: absolute;
+            width: 20px;
+            height: 20px;
+            border-color: rgba(255,255,255,0.5);
+            transition: all 0.3s;
+        }
+        .tl { top: 0; left: 0; border-top: 3px solid; border-left: 3px solid; border-radius: 8px 0 0 0; }
+        .tr { top: 0; right: 0; border-top: 3px solid; border-right: 3px solid; border-radius: 0 8px 0 0; }
+        .bl { bottom: 0; left: 0; border-bottom: 3px solid; border-left: 3px solid; border-radius: 0 0 0 8px; }
+        .br { bottom: 0; right: 0; border-bottom: 3px solid; border-right: 3px solid; border-radius: 0 0 8px 0; }
+        
+        .targeting .corner { border-color: var(--g-color); box-shadow: 0 0 10px var(--g-color); }
+        
+        .mode-camera .input-section { transform: translateY(100%); opacity: 0; pointer-events: none; }
+        .mode-camera .central-block { height: 70vh; }
+        
+        .input-section { transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1); }
+        .central-block { transition: height 0.4s cubic-bezier(0.4, 0, 0.2, 1); }
+
+        .btn-action {
+            background: linear-gradient(145deg, #222, #1a1a1a);
+            box-shadow: 5px 5px 15px #0a0a0a, -5px -5px 15px #1f1f1f;
+            transition: all 0.2s;
+        }
+        .btn-action:active { transform: scale(0.96); box-shadow: inset 2px 2px 5px #000; }
+
+        .social-link { opacity: 0.5; transition: opacity 0.3s; }
+        .social-link:hover { opacity: 1; }
+    </style>
+</head>
+<body class="flex flex-col min-h-screen p-4 pb-6">
+
+    <header class="flex items-center justify-between mb-4 relative z-50">
+        <div class="flex items-center gap-3">
+            <canvas id="mini-qr" width="32" height="32" class="rounded-lg bg-zinc-900/50 border border-white/10"></canvas>
+            <div class="flex flex-col">
+                <h1 class="text-2xl font-black tracking-tighter flex gap-0.5">
+                    <span class="logo-q">Q</span><span class="logo-r">R</span><span class="logo-g">G</span><span class="logo-b">B</span>
+                </h1>
+                <span class="text-[8px] text-zinc-500 font-mono tracking-widest uppercase">SCI Engine by M.Kashkarov</span>
+            </div>
+        </div>
+        
+     <div class="flex items-center gap-2">
+            <button id="menu-btn" class="w-10 h-10 flex items-center justify-center text-white text-xl active:scale-90 transition-transform">☰</button>
+        </div>
+        
+   <div id="dropdown" class="dropdown-menu absolute top-full right-0 mt-2 w-56 bg-zinc-900/95 backdrop-blur-xl rounded-2xl border border-white/10 shadow-2xl z-50 overflow-hidden">
+            <div class="flex border-b border-white/10 p-1 bg-zinc-800/50">
+                <button onclick="setLanguage('uk')" class="flex-1 py-2 text-[10px] font-bold text-zinc-400 hover:text-white transition-colors border-r border-white/5">🇺🇦 UK</button>
+                <button onclick="setLanguage('en')" class="flex-1 py-2 text-[10px] font-bold text-zinc-400 hover:text-white transition-colors">🇬🇧 EN</button>
+            </div>
+            <div class="py-0">
+                <a href="#" onclick="openModal('usage')" class="block px-4 py-3.5 text-xs text-zinc-300 hover:bg-zinc-800 border-b border-white/5" data-i18n="menu_usage">Як користуватися</a>
+                <a href="#" onclick="openModal('tech')" class="block px-4 py-3.5 text-xs text-zinc-300 hover:bg-zinc-800 border-b border-white/5" data-i18n="menu_tech">Технологія</a>
+                <a href="#" onclick="const vcard='BEGIN:VCARD\nVERSION:3.0\nFN;CHARSET=UTF-8:Mykhailo Kashkarov\nORG;CHARSET=UTF-8:Science-Art Researcher; SCI Model Creator\nTITLE;CHARSET=UTF-8:Artist & Researcher\nEMAIL;TYPE=WORK:bakminsterfuler@gmail.com\nEMAIL;TYPE=HOME:colqrnament@gmail.com\nURL:https://zenodo.org/records/18895764\nURL:https://github.com/astra31415926\nURL:https://dev.to/astra31415926\nURL:https://www.youtube.com/@Michael-RGB-ART\nNOTE;CHARSET=UTF-8:Creator of SCI Universal Model for Spectral QR Codes\nEND:VCARD'; const blob=new Blob([vcard],{type:'text/vcard;charset=utf-8'}); const url=window.URL.createObjectURL(blob); const a=document.createElement('a'); a.href=url; a.download='Kashkarov_Contact.vcf'; a.click(); window.URL.revokeObjectURL(url); return false;" class="block px-4 py-3.5 text-xs text-blue-400 hover:bg-zinc-800 border-b border-white/5" data-i18n="menu_contact">Скачати vCard</a>
+                <button onclick="globalReset()" class="w-full text-left px-4 py-3.5 text-xs text-red-400 hover:bg-zinc-800 font-bold uppercase tracking-wide" data-i18n="menu_reset">Reset</button>
+            </div>
+        </div>
+    </header>
+    <script>
+        function downloadVCard() {
+            const vcard = `BEGIN:VCARD
+VERSION:3.0
+FN;CHARSET=UTF-8:Mykhailo Kashkarov
+ORG;CHARSET=UTF-8:Science-Art Researcher; SCI Model Creator
+TITLE;CHARSET=UTF-8:Artist & Researcher
+EMAIL;TYPE=WORK:bakminsterfuler@gmail.com
+EMAIL;TYPE=HOME:colqrnament@gmail.com
+URL:https://zenodo.org/records/18895764
+URL:https://github.com/astra31415926
+URL:https://dev.to/astra31415926
+URL:https://www.youtube.com/@Michael-RGB-ART
+NOTE;CHARSET=UTF-8:Creator of SCI Universal Model for Spectral QR Codes
+END:VCARD`;
+          const blob = new Blob([vcard], { type: 'text/vcard;charset=utf-8' });
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.style.display = 'none';
+            a.href = url;
+            a.download = 'Kashkarov_Contact.vcf';
+            document.body.appendChild(a);
+            a.click();
+            setTimeout(() => {
+                document.body.removeChild(a);
+                window.URL.revokeObjectURL(url);
+            }, 100);
+        }
+    </script>
+
+    <div class="input-section space-y-2 mb-4 px-1">
+        <div class="relative">
+            <div class="absolute left-0 top-0 bottom-0 w-1 bg-red-600 rounded-full"></div>
+            <textarea id="r-text" class="w-full p-3 pl-4 rounded-xl outline-none h-12 text-sm font-medium" placeholder="RED CHANNEL"></textarea>
+        </div>
+        <div class="relative">
+            <div class="absolute left-0 top-0 bottom-0 w-1 bg-green-600 rounded-full"></div>
+            <textarea id="g-text" class="w-full p-3 pl-4 rounded-xl outline-none h-12 text-sm font-medium" placeholder="GREEN CHANNEL"></textarea>
+        </div>
+        <div class="relative">
+            <div class="absolute left-0 top-0 bottom-0 w-1 bg-blue-600 rounded-full"></div>
+            <textarea id="b-text" class="w-full p-3 pl-4 rounded-xl outline-none h-12 text-sm font-medium" placeholder="BLUE (PRIORITY)"></textarea>
+        </div>
+    </div>
+
+    <div class="central-block flex-1 flex flex-col items-center justify-center relative">
+        <div id="central-container" class="relative w-full max-w-xs aspect-square bg-zinc-950 rounded-3xl p-4 border border-white/5 shadow-2xl overflow-hidden">
+            <div class="absolute inset-0 opacity-20 pointer-events-none" style="background: radial-gradient(circle at 20% 20%, #FF004D 0%, transparent 40%), radial-gradient(circle at 80% 80%, #0088FF 0%, transparent 40%);"></div>
+            <canvas id="qr-main" width="512" height="512" class="w-full h-full transition-all duration-500 relative z-10"></canvas>
+            <video id="video" class="absolute inset-0 w-full h-full object-cover hidden z-10" playsinline></video>
+            <canvas id="freeze-frame" class="absolute inset-0 w-full h-full object-cover hidden z-12"></canvas>
+            <div class="viewfinder-corners hidden" id="viewfinder-ui">
+                <div class="corner tl"></div><div class="corner tr"></div>
+                <div class="corner bl"></div><div class="corner br"></div>
+            </div>
+            <div class="scan-line"></div>
+            <div id="flash-layer" class="absolute inset-0 bg-white opacity-0 pointer-events-none z-50"></div>
+        </div>
+
+        <div id="result-indicators" class="w-full max-w-xs mt-4 space-y-1.5 opacity-0 transition-opacity duration-500">
+            <div id="res-r" class="p-2.5 bg-zinc-900/60 rounded-xl flex items-center gap-3 border border-white/5 backdrop-blur-sm">
+                <div class="indicator"></div>
+                <span class="text-[10px] text-zinc-500 uppercase tracking-tighter font-mono flex-1 truncate">R: —</span>
+            </div>
+            <div id="res-g" class="p-2.5 bg-zinc-900/60 rounded-xl flex items-center gap-3 border border-white/5 backdrop-blur-sm">
+                <div class="indicator"></div>
+                <span class="text-[10px] text-zinc-500 uppercase tracking-tighter font-mono flex-1 truncate">G: —</span>
+            </div>
+            <div id="res-b" class="p-2.5 bg-zinc-900/60 rounded-xl flex items-center gap-3 border border-blue-500/20 backdrop-blur-sm">
+                <div class="indicator"></div>
+                <span class="text-[10px] text-zinc-400 uppercase tracking-tighter font-mono flex-1 truncate">B: —</span>
+            </div>
+        </div>
+    </div>
+
+    <div class="mt-6 space-y-4">
+        <button id="save-btn" onclick="saveQR()" class="w-full py-4 bg-white text-black font-bold rounded-2xl hidden active:scale-95 text-sm tracking-widest uppercase shadow-lg shadow-white/20" data-i18n="btn_save">Save Result</button>
+        <div class="grid grid-cols-2 gap-3">
+            <button onclick="startCamera()" class="py-3.5 bg-zinc-900 text-white font-semibold rounded-2xl border border-white/10 active:scale-95 text-xs uppercase tracking-wider flex items-center justify-center gap-2" data-i18n="btn_camera">
+                <span>Камера</span>
+            </button>
+            <input type="file" id="file-input" accept="image/*" class="hidden" onchange="handleFile(event)">
+            <button onclick="triggerFileInput()" class="py-3.5 bg-zinc-900 text-white font-semibold rounded-2xl border border-white/10 active:scale-95 text-xs uppercase tracking-wider flex items-center justify-center gap-2" data-i18n="btn_gallery">
+                <span>Галерея</span>
+            </button>
+        </div>
+    </div>
+
+    <footer class="mt-8 border-t border-white/5 pt-6 pb-4 text-center">
+        <p class="text-[10px] text-zinc-500 font-bold tracking-widest uppercase mb-4">Mykhailo Kashkarov | Science-Art Researcher</p>
+        <div class="flex justify-center gap-6 mb-6">
+            <a href="https://www.youtube.com/@Michael-RGB-ART" class="social-link">YT</a>
+            <a href="https://www.instagram.com/mixailkashkarov/" class="social-link">IG</a>
+            <a href="https://x.com/MihailKashkarov" class="social-link">X</a>
+            <a href="https://medium.com/@Bakminsterfuler" class="social-link">M</a>
+            <a href="https://zenodo.org/records/18895764" class="social-link text-blue-400">Zenodo</a>
+        </div>
+        <p class="text-[8px] text-zinc-600">© 2026 SCI Universal Model. All Rights Reserved.</p>
+    </footer>
+
+    <div id="modal-overlay" class="modal-overlay fixed inset-0 z-[200] flex items-center justify-center p-6">
+        <div class="modal-content w-full max-w-md bg-zinc-900/95 border border-white/10 rounded-3xl p-6 shadow-2xl relative max-h-[80vh] overflow-y-auto backdrop-blur-xl">
+            <button onclick="closeModal()" class="absolute top-4 right-4 text-zinc-500 hover:text-white text-xs font-bold border border-white/10 px-3 py-1 rounded-lg hover:bg-zinc-800 transition-colors" data-i18n="btn_close">CLOSE</button>
+            <h2 id="modal-title" class="text-lg font-bold mb-4"></h2>
+            <div id="modal-body" class="text-sm text-zinc-300 space-y-4 leading-relaxed"></div>
+        </div>
+    </div>
+
 <script>
         const translations = {
             uk: {
@@ -44,13 +329,7 @@
 
         let currentLang = 'uk';
         let scanning = false;
-        
-        // --- MODIFIED STATE MANAGEMENT ---
-        let results = {r:null, g:null, b:null}; // Acts as scanBuffer
-        let stabilityTimer = 0;
-        const STABILITY_THRESHOLD = 50; // ~1.5 seconds at 30fps
-        // ---------------------------------
-        
+        let results = {r:null, g:null, b:null};
         let analysisReady = false;
 
         function applyBradley(imgData, chIdx) {
@@ -126,33 +405,27 @@
             els.mini.getContext('2d').drawImage(els.main, 0, 0, 32, 32);
         }
 
-        // --- ENHANCED SCANNING LOGIC ---
-        function processImageData(img, w, h) {
-            let foundInFrame = 0;
-            
+        function processImageData(img, w, h, isFileScan) {
+            let foundAny = false;
             [0, 1, 2].forEach(idx => {
                 const ch = ['r', 'g', 'b'][idx];
-                
-                // STRATEGY: We run jsQR on all channels to determine visibility (focus stability),
-                // but we only update the buffer if the channel was empty.
+                if (results[ch]) return;
                 const mono = applyBradley(img, idx);
                 const code = jsQR(mono, w, h, { inversionAttempts: "attemptBoth" });
-                
-                if (code) {
-                    foundInFrame++; // Indicate we found A code in this frame
-                    
-                    // Buffer Logic: Only store if we don't have it yet
-                    if (!results[ch]) {
-                        results[ch] = code.data;
-                    }
-                }
+                if (code) { results[ch] = code.data; foundAny = true; }
             });
             
-            return foundInFrame;
+            if(foundAny) {
+                els.viewfinder.classList.add('targeting'); 
+                if(results.b || (results.r && results.g && results.b)) {
+                    analysisReady = true;
+                    if(!isFileScan) triggerCaptureSequence();
+                }
+            }
+            return foundAny;
         }
-        // -------------------------------
 
-        function triggerCaptureSequence() {
+      function triggerCaptureSequence() {
             stopCamera();
             els.freeze.width = 480; els.freeze.height = 480;
             const fctx = els.freeze.getContext('2d');
@@ -220,7 +493,6 @@
             generateQR();
             document.body.classList.remove('mode-camera');
         }
-        
         async function startCamera() {
             globalReset();
             document.body.classList.add('mode-camera');
@@ -243,7 +515,6 @@
             if (els.video.srcObject) els.video.srcObject.getTracks().forEach(t => t.stop());
         }
 
-        // --- MODIFIED SCAN LOOP & VISUAL FEEDBACK ---
         function scanFrame() {
             if (!scanning) return;
             if (els.video.readyState === els.video.HAVE_ENOUGH_DATA) {
@@ -251,49 +522,13 @@
                 cv.width = 480; cv.height = 480;
                 const s = Math.min(els.video.videoWidth, els.video.videoHeight);
                 cv.getContext('2d').drawImage(els.video, (els.video.videoWidth-s)/2, (els.video.videoHeight-s)/2, s, s, 0, 0, 480, 480);
-                
-                const foundCount = processImageData(cv.getContext('2d').getImageData(0,0,480,480), 480, 480);
-                
-                // Visual Feedback Logic
-                if(foundCount > 0) {
-                    stabilityTimer++;
-                    
-                    // Dynamically update viewfinder glow based on stability
-                    const intensity = Math.min(1, stabilityTimer / STABILITY_THRESHOLD);
-                    const glowSize = 10 + (intensity * 15);
-                    const alpha = 0.5 + (intensity * 0.5);
-                    
-                    // Apply styles to corners
-                    const corners = els.viewfinder.querySelectorAll('.corner');
-                    corners.forEach(c => {
-                        c.style.borderColor = `rgba(0, 255, 100, ${alpha})`;
-                        c.style.boxShadow = `0 0 ${glowSize}px rgba(0, 255, 100, ${intensity})`;
-                    });
-
-                    // CAPTURE CONDITIONS:
-                    // 1. All 3 channels found
-                    const allFound = results.r && results.g && results.b;
-                    // 2. Stability Threshold met (and at least one channel found)
-                    const timeout = stabilityTimer >= STABILITY_THRESHOLD;
-                    
-                    if (allFound || (timeout && (results.r || results.g || results.b))) {
-                        triggerCaptureSequence();
-                        return; // Stop loop
-                    }
-                } else {
-                    // Reset stability if tracking is lost
-                    stabilityTimer = 0;
-                    // Reset visuals
-                    const corners = els.viewfinder.querySelectorAll('.corner');
-                    corners.forEach(c => {
-                        c.style.borderColor = 'rgba(255,255,255,0.5)';
-                        c.style.boxShadow = 'none';
-                    });
+                if(!analysisReady) {
+                   const found = processImageData(cv.getContext('2d').getImageData(0,0,480,480), 480, 480, false);
+                   if(found) els.viewfinder.classList.add('targeting');
                 }
             }
             requestAnimationFrame(scanFrame);
         }
-        // -------------------------------------------
 
         function handleFile(e) {
             const file = e.target.files[0]; if (!file) return;
@@ -312,9 +547,7 @@
                     els.freeze.classList.remove('hidden'); 
                     els.video.classList.add('hidden');
                     els.main.style.opacity = 0;
-                    
-                    // Directly process file (no accumulation needed for static image)
-                    processImageData(ctx.getImageData(0,0,s,s), s, s);
+                    processImageData(ctx.getImageData(0,0,s,s), s, s, true);
                     startVisualizationSequence();
                 };
                 img.src = ev.target.result;
@@ -335,7 +568,6 @@
 
         function prepareScannerUI() {
             results = {r:null, g:null, b:null}; analysisReady = false;
-            stabilityTimer = 0; // Reset timer
             els.main.style.opacity = 0;
             els.resultIndicators.style.opacity = 0;
             els.centralContainer.classList.remove('scan-active');
@@ -344,9 +576,7 @@
         function globalReset() {
             stopCamera(); 
             els.r.value = ""; els.g.value = ""; els.b.value = "";
-            results = {r:null, g:null, b:null}; 
-            stabilityTimer = 0; // Reset timer
-            analysisReady = false;
+            results = {r:null, g:null, b:null}; analysisReady = false;
             generateQR(); 
             els.resultIndicators.style.opacity = 0;
             els.centralContainer.classList.remove('scan-active');
@@ -377,3 +607,5 @@
         setLanguage('uk');
         generateQR();
     </script>
+</body>
+</html>
