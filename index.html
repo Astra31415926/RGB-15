@@ -1,0 +1,379 @@
+<script>
+        const translations = {
+            uk: {
+                menu_usage: "Як користуватися", 
+                menu_tech: "Технологія", 
+                menu_reset: "Скинути все", 
+                menu_contact: "Скачати vCard",
+                btn_save: "Зберегти PNG", 
+                btn_camera: "Камера", 
+                btn_gallery: "Галерея", 
+                btn_close: "ЗАКРИТИ",
+                ph_r: "RED CHANNEL", 
+                ph_g: "GREEN CHANNEL", 
+                ph_b: "BLUE CHANNEL",
+                res_wait: "Сканування...", 
+                res_fail: "[!] Помилка",
+                m_usage_title: "📝 Інструкція", 
+                m_usage_body: "<p><b>1. Створення:</b> Введіть текст у поля R, G, B. Код сформується автоматично.</p><p><b>2. Сканування:</b> Натисніть 'Камера' та наведіть на кольоровий QR-код.</p><p><b>3. Результат:</b> Дані розподіляться по відповідних каналах.</p>",
+                m_tech_title: "⚙️ Технологія", 
+                m_tech_body: `<h3>Що вміє цей сайт?</h3><p>Він зчитує кольорові QR-коди з фізичного носія. Я написав програму — і вона працює.</p><h3>У чому суть методу?</h3><p>Раніше кольорові QR-коди не стали масовими, бо при друку фарби змішувалися і створювали «шум». Мій метод вирішує це на рівні фізики: спеціально підібрані пігменти не заважають один одному.</p><p><b>Результат:</b> кольоровий QR-код, який можна надрукувати і впевнено зчитати навіть з паперу.</p><hr><p>📄 Детальніше про фізику та підбір фарб — у дослідженні на <a href="https://doi.org/10.5281/zenodo.18895764" target="_blank" style="color: #0088FF;">Zenodo</a>.</p>`
+            },
+            en: {
+                menu_usage: "How to use", menu_tech: "SCI Technology", menu_reset: "Reset All", menu_contact: "Download vCard",
+                btn_save: "Save PNG", btn_camera: "Camera", btn_gallery: "Gallery", btn_close: "CLOSE",
+                ph_r: "RED CHANNEL", ph_g: "GREEN CHANNEL", ph_b: "BLUE CHANNEL",
+                res_wait: "Scanning...", res_fail: "[!] Failed",
+                m_usage_title: "📝 Usage", 
+                m_usage_body: "<p><b>1. Create:</b> Enter text into R, G, B fields. Code generates automatically.</p><p><b>2. Scan:</b> Tap 'Camera' and point at a color QR code.</p><p><b>3. Result:</b> Data fills into respective channels.</p>",
+                m_tech_title: "⚙️ SCI Universal Model", 
+                m_tech_body: "<p><b>SCI (Spectral Channel Integrity)</b> is a model for deterministic spectral response normalization, created by Mykhailo Kashkarov.</p><p>It enables reflective surfaces (like painted canvases) to act as stable data carriers by synchronizing pigment reflectance levels.</p><p><a href='https://zenodo.org/records/18895764' style='color:#0088FF'>Read Full Research on Zenodo</a></p>"
+            }
+        };
+
+        const els = {
+            r: document.getElementById('r-text'), g: document.getElementById('g-text'), b: document.getElementById('b-text'),
+            main: document.getElementById('qr-main'), mini: document.getElementById('mini-qr'),
+            video: document.getElementById('video'), freeze: document.getElementById('freeze-frame'),
+            centralContainer: document.getElementById('central-container'), flash: document.getElementById('flash-layer'),
+            resultIndicators: document.getElementById('result-indicators'),
+            resR: document.getElementById('res-r'), resG: document.getElementById('res-g'), resB: document.getElementById('res-b'),
+            viewfinder: document.getElementById('viewfinder-ui'),
+            dropdown: document.getElementById('dropdown')
+        };
+
+        let currentLang = 'uk';
+        let scanning = false;
+        
+        // --- MODIFIED STATE MANAGEMENT ---
+        let results = {r:null, g:null, b:null}; // Acts as scanBuffer
+        let stabilityTimer = 0;
+        const STABILITY_THRESHOLD = 50; // ~1.5 seconds at 30fps
+        // ---------------------------------
+        
+        let analysisReady = false;
+
+        function applyBradley(imgData, chIdx) {
+            const w = imgData.width, h = imgData.height;
+            const input = imgData.data;
+            const output = new Uint8ClampedArray(w * h * 4);
+            const intImg = new Int32Array(w * h);
+            const s = Math.floor(w / 8), t = 15;
+
+            for (let y = 0; y < h; y++) {
+                let sum = 0;
+                for (let x = 0; x < w; x++) {
+                    sum += input[(y * w + x) * 4 + chIdx];
+                    intImg[y * w + x] = (y > 0 ? intImg[(y - 1) * w + x] : 0) + sum;
+                }
+            }
+
+            for (let y = 0; y < h; y++) {
+                for (let x = 0; x < w; x++) {
+                    const x1 = Math.max(x - s, 0), x2 = Math.min(x + s, w - 1);
+                    const y1 = Math.max(y - s, 0), y2 = Math.min(y + s, h - 1);
+                    const count = (x2 - x1) * (y2 - y1);
+                    const sum = intImg[y2 * w + x2] - intImg[y1 * w + x2] - intImg[y2 * w + x1] + intImg[y1 * w + x1];
+                    const val = input[(y * w + x) * 4 + chIdx];
+                    const res = (val * count < sum * (100 - t) / 100) ? 0 : 255;
+                    const idx = (y * w + x) * 4;
+                    output[idx] = output[idx+1] = output[idx+2] = res; output[idx+3] = 255;
+                }
+            }
+            return output;
+        }
+
+        function generateQR() {
+            const texts = [els.r.value, els.g.value, els.b.value];
+            if (!texts.some(t => t.trim())) {
+                els.main.style.opacity = 0.1;
+                document.getElementById('save-btn').classList.add('hidden');
+                return;
+            }
+            els.main.style.opacity = 1;
+            els.freeze.classList.add('hidden');
+            els.video.classList.add('hidden');
+            document.body.classList.remove('mode-camera');
+            els.viewfinder.classList.add('hidden');
+            
+            let maxVer = 1;
+            texts.forEach(t => {
+                if(!t.trim()) return;
+                const tmp = qrcode(0, 'M'); 
+                tmp.addData(unescape(encodeURIComponent(t))); tmp.make();
+                const v = Math.floor((tmp.getModuleCount() - 17) / 4);
+                if (v > maxVer) maxVer = v;
+            });
+            
+            const ctx = els.main.getContext('2d');
+            ctx.fillStyle = "#000"; ctx.fillRect(0,0,512,512);
+            ctx.globalCompositeOperation = "lighten";
+            
+            texts.forEach((text, i) => {
+                if(!text.trim()) return;
+                const qr = qrcode(maxVer, 'M'); 
+                qr.addData(unescape(encodeURIComponent(text))); qr.make();
+                const mod = 512 / qr.getModuleCount();
+                ctx.fillStyle = i === 0 ? "#FF0000" : (i === 1 ? "#00FF00" : "#0000FF");
+                for (let r = 0; r < qr.getModuleCount(); r++) {
+                    for (let c = 0; c < qr.getModuleCount(); c++) {
+                        if (qr.isDark(r, c)) ctx.fillRect(c * mod, r * mod, mod, mod);
+                    }
+                }
+            });
+            ctx.globalCompositeOperation = "source-over";
+            document.getElementById('save-btn').classList.remove('hidden');
+            els.mini.getContext('2d').drawImage(els.main, 0, 0, 32, 32);
+        }
+
+        // --- ENHANCED SCANNING LOGIC ---
+        function processImageData(img, w, h) {
+            let foundInFrame = 0;
+            
+            [0, 1, 2].forEach(idx => {
+                const ch = ['r', 'g', 'b'][idx];
+                
+                // STRATEGY: We run jsQR on all channels to determine visibility (focus stability),
+                // but we only update the buffer if the channel was empty.
+                const mono = applyBradley(img, idx);
+                const code = jsQR(mono, w, h, { inversionAttempts: "attemptBoth" });
+                
+                if (code) {
+                    foundInFrame++; // Indicate we found A code in this frame
+                    
+                    // Buffer Logic: Only store if we don't have it yet
+                    if (!results[ch]) {
+                        results[ch] = code.data;
+                    }
+                }
+            });
+            
+            return foundInFrame;
+        }
+        // -------------------------------
+
+        function triggerCaptureSequence() {
+            stopCamera();
+            els.freeze.width = 480; els.freeze.height = 480;
+            const fctx = els.freeze.getContext('2d');
+            const vw = els.video.videoWidth, vh = els.video.videoHeight;
+            const s = Math.min(vw, vh);
+            fctx.drawImage(els.video, (vw-s)/2, (vh-s)/2, s, s, 0, 0, 480, 480);
+            els.video.classList.add('hidden'); 
+            els.freeze.classList.remove('hidden');
+            startVisualizationSequence();
+        }
+
+        function startVisualizationSequence() {
+            els.centralContainer.classList.add('scan-active');
+            playSuccessSound();
+            setTimeout(() => {
+                els.flash.classList.add('flash-anim');
+                setTimeout(() => {
+                    els.flash.classList.remove('flash-anim');
+                    els.centralContainer.classList.remove('scan-active');
+                    els.viewfinder.classList.remove('targeting');
+                    updateResultUI();
+                }, 400);
+            }, 2600);
+        }
+
+        function playSuccessSound() {
+            try {
+                const ctx = new (window.AudioContext || window.webkitAudioContext)();
+                const now = ctx.currentTime;
+                const osc = ctx.createOscillator();
+                const gain = ctx.createGain();
+
+                osc.type = 'sine';
+                osc.frequency.setValueAtTime(200, now);
+                osc.frequency.exponentialRampToValueAtTime(1200, now + 2.5);
+
+                gain.gain.setValueAtTime(0, now);
+                gain.gain.linearRampToValueAtTime(0.05, now + 0.5);
+                gain.gain.setValueAtTime(0.05, now + 2.0);
+                gain.gain.linearRampToValueAtTime(0, now + 2.5);
+
+                osc.connect(gain);
+                gain.connect(ctx.destination);
+                osc.start(now);
+                osc.stop(now + 2.6);
+            } catch(e) {}
+        }
+
+        function updateResultUI() {
+            els.resultIndicators.style.opacity = 1;
+            ['r', 'g', 'b'].forEach(ch => {
+                const el = els['res' + ch.toUpperCase()];
+                const indicator = el.querySelector('.indicator');
+                const text = el.querySelector('span');
+                if(results[ch]) {
+                    text.textContent = results[ch];
+                    indicator.className = 'indicator active-'+ch;
+                    el.style.opacity = 1;
+                    els[ch].value = results[ch];
+                } else {
+                    el.style.opacity = 0.4;
+                    text.textContent = translations[currentLang].res_fail;
+                }
+            });
+            generateQR();
+            document.body.classList.remove('mode-camera');
+        }
+        
+        async function startCamera() {
+            globalReset();
+            document.body.classList.add('mode-camera');
+            els.viewfinder.classList.remove('hidden');
+            els.resultIndicators.style.opacity = 0.7;
+            try {
+                const s = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment", width: {ideal: 1280} } });
+                els.video.srcObject = s; 
+                els.video.play();
+                els.video.classList.remove('hidden');
+                els.main.style.opacity = 0;
+                els.freeze.classList.add('hidden');
+                scanning = true; 
+                requestAnimationFrame(scanFrame);
+            } catch(e) { alert("Camera Error: " + e); }
+        }
+
+        function stopCamera() {
+            scanning = false;
+            if (els.video.srcObject) els.video.srcObject.getTracks().forEach(t => t.stop());
+        }
+
+        // --- MODIFIED SCAN LOOP & VISUAL FEEDBACK ---
+        function scanFrame() {
+            if (!scanning) return;
+            if (els.video.readyState === els.video.HAVE_ENOUGH_DATA) {
+                const cv = document.createElement('canvas');
+                cv.width = 480; cv.height = 480;
+                const s = Math.min(els.video.videoWidth, els.video.videoHeight);
+                cv.getContext('2d').drawImage(els.video, (els.video.videoWidth-s)/2, (els.video.videoHeight-s)/2, s, s, 0, 0, 480, 480);
+                
+                const foundCount = processImageData(cv.getContext('2d').getImageData(0,0,480,480), 480, 480);
+                
+                // Visual Feedback Logic
+                if(foundCount > 0) {
+                    stabilityTimer++;
+                    
+                    // Dynamically update viewfinder glow based on stability
+                    const intensity = Math.min(1, stabilityTimer / STABILITY_THRESHOLD);
+                    const glowSize = 10 + (intensity * 15);
+                    const alpha = 0.5 + (intensity * 0.5);
+                    
+                    // Apply styles to corners
+                    const corners = els.viewfinder.querySelectorAll('.corner');
+                    corners.forEach(c => {
+                        c.style.borderColor = `rgba(0, 255, 100, ${alpha})`;
+                        c.style.boxShadow = `0 0 ${glowSize}px rgba(0, 255, 100, ${intensity})`;
+                    });
+
+                    // CAPTURE CONDITIONS:
+                    // 1. All 3 channels found
+                    const allFound = results.r && results.g && results.b;
+                    // 2. Stability Threshold met (and at least one channel found)
+                    const timeout = stabilityTimer >= STABILITY_THRESHOLD;
+                    
+                    if (allFound || (timeout && (results.r || results.g || results.b))) {
+                        triggerCaptureSequence();
+                        return; // Stop loop
+                    }
+                } else {
+                    // Reset stability if tracking is lost
+                    stabilityTimer = 0;
+                    // Reset visuals
+                    const corners = els.viewfinder.querySelectorAll('.corner');
+                    corners.forEach(c => {
+                        c.style.borderColor = 'rgba(255,255,255,0.5)';
+                        c.style.boxShadow = 'none';
+                    });
+                }
+            }
+            requestAnimationFrame(scanFrame);
+        }
+        // -------------------------------------------
+
+        function handleFile(e) {
+            const file = e.target.files[0]; if (!file) return;
+            const reader = new FileReader();
+            reader.onload = (ev) => {
+                const img = new Image();
+                img.onload = () => {
+                    prepareScannerUI();
+                    const s = 1024, cv = document.createElement('canvas');
+                    cv.width = s; cv.height = s;
+                    const ctx = cv.getContext('2d');
+                    const min = Math.min(img.width, img.height);
+                    ctx.drawImage(img, (img.width-min)/2, (img.height-min)/2, min, min, 0, 0, s, s);
+                    els.freeze.width = 480; els.freeze.height = 480;
+                    els.freeze.getContext('2d').drawImage(cv, 0, 0, 480, 480);
+                    els.freeze.classList.remove('hidden'); 
+                    els.video.classList.add('hidden');
+                    els.main.style.opacity = 0;
+                    
+                    // Directly process file (no accumulation needed for static image)
+                    processImageData(ctx.getImageData(0,0,s,s), s, s);
+                    startVisualizationSequence();
+                };
+                img.src = ev.target.result;
+            };
+            reader.readAsDataURL(file);
+        }
+
+        function setLanguage(l) {
+            currentLang = l;
+            document.querySelectorAll('[data-i18n]').forEach(el => {
+                const key = el.getAttribute('data-i18n');
+                if (translations[l][key]) el.textContent = translations[l][key];
+            });
+            els.r.placeholder = translations[l].ph_r;
+            els.g.placeholder = translations[l].ph_g;
+            els.b.placeholder = translations[l].ph_b;
+        }
+
+        function prepareScannerUI() {
+            results = {r:null, g:null, b:null}; analysisReady = false;
+            stabilityTimer = 0; // Reset timer
+            els.main.style.opacity = 0;
+            els.resultIndicators.style.opacity = 0;
+            els.centralContainer.classList.remove('scan-active');
+        }
+
+        function globalReset() {
+            stopCamera(); 
+            els.r.value = ""; els.g.value = ""; els.b.value = "";
+            results = {r:null, g:null, b:null}; 
+            stabilityTimer = 0; // Reset timer
+            analysisReady = false;
+            generateQR(); 
+            els.resultIndicators.style.opacity = 0;
+            els.centralContainer.classList.remove('scan-active');
+            els.main.classList.remove('hidden'); 
+            els.freeze.classList.add('hidden');
+            els.video.classList.add('hidden');
+            els.viewfinder.classList.add('hidden');
+            document.body.classList.remove('mode-camera');
+        }
+
+        function openModal(t) {
+            document.getElementById('modal-title').textContent = translations[currentLang]['m_'+t+'_title'];
+            document.getElementById('modal-body').innerHTML = translations[currentLang]['m_'+t+'_body'];
+            document.getElementById('modal-overlay').classList.add('show');
+            els.dropdown.classList.remove('show');
+        }
+        function closeModal() { document.getElementById('modal-overlay').classList.remove('show'); }
+        function triggerFileInput() { document.getElementById('file-input').click(); }
+        function saveQR() { const a = document.createElement('a'); a.download = 'RGB11_Result.png'; a.href = els.main.toDataURL(); a.click(); }
+
+        [els.r, els.g, els.b].forEach(el => el.addEventListener('input', generateQR));
+        document.getElementById('menu-btn').onclick = (e) => { 
+            e.stopPropagation(); 
+            els.dropdown.classList.toggle('show'); 
+        };
+        document.onclick = () => els.dropdown.classList.remove('show');
+        
+        setLanguage('uk');
+        generateQR();
+    </script>
