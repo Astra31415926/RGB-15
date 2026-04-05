@@ -405,24 +405,44 @@ END:VCARD`;
             els.mini.getContext('2d').drawImage(els.main, 0, 0, 32, 32);
         }
 
-        function processImageData(img, w, h, isFileScan) {
-            let foundAny = false;
+      function processImageData(img, w, h, isFileScan) {
+            let foundCount = 0;
             [0, 1, 2].forEach(idx => {
                 const ch = ['r', 'g', 'b'][idx];
-                if (results[ch]) return;
+                if (results[ch]) { foundCount++; return; }
                 const mono = applyBradley(img, idx);
                 const code = jsQR(mono, w, h, { inversionAttempts: "attemptBoth" });
-                if (code) { results[ch] = code.data; foundAny = true; }
+                if (code) { results[ch] = code.data; foundCount++; }
             });
             
-            if(foundAny) {
-                els.viewfinder.classList.add('targeting'); 
-                if(results.b || (results.r && results.g && results.b)) {
-                    analysisReady = true;
-                    if(!isFileScan) triggerCaptureSequence();
-                }
+            if (!isFileScan) updateVisualFeedback(foundCount);
+
+            if (results.r && results.g && results.b) {
+                analysisReady = true;
+                if (!isFileScan) triggerCaptureSequence();
             }
-            return foundAny;
+            return foundCount > 0;
+        }
+
+        // Нова функція для керування візуалом (додана всередину твого блоку)
+        function updateVisualFeedback(count) {
+            if (!window.statusLabel) {
+                window.statusLabel = document.createElement('div');
+                window.statusLabel.className = "absolute inset-0 flex items-center justify-center text-[10px] font-bold text-white/40 pointer-events-none uppercase z-20";
+                els.centralContainer.appendChild(window.statusLabel);
+            }
+
+            if (count > 0) {
+                els.viewfinder.classList.add('targeting');
+                window.statusLabel.style.opacity = "0";
+                const speed = count === 1 ? '1.2s' : (count === 2 ? '0.6s' : '0.2s');
+                els.viewfinder.style.animation = `pulse ${speed} infinite ease-in-out`;
+            } else {
+                els.viewfinder.classList.remove('targeting');
+                window.statusLabel.style.opacity = "1";
+                window.statusLabel.textContent = translations[currentLang].status_no_qr || "SEARCHING...";
+                els.viewfinder.style.animation = "none";
+            }
         }
 
       function triggerCaptureSequence() {
@@ -521,10 +541,10 @@ END:VCARD`;
                 const cv = document.createElement('canvas');
                 cv.width = 480; cv.height = 480;
                 const s = Math.min(els.video.videoWidth, els.video.videoHeight);
-                cv.getContext('2d').drawImage(els.video, (els.video.videoWidth-s)/2, (els.video.videoHeight-s)/2, s, s, 0, 0, 480, 480);
+                const ctx = cv.getContext('2d');
+                ctx.drawImage(els.video, (els.video.videoWidth-s)/2, (els.video.videoHeight-s)/2, s, s, 0, 0, 480, 480);
                 if(!analysisReady) {
-                   const found = processImageData(cv.getContext('2d').getImageData(0,0,480,480), 480, 480, false);
-                   if(found) els.viewfinder.classList.add('targeting');
+                   processImageData(ctx.getImageData(0,0,480,480), 480, 480, false);
                 }
             }
             requestAnimationFrame(scanFrame);
